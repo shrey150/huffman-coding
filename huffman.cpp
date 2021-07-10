@@ -2,8 +2,8 @@
 #include <unordered_map>
 #include <queue>
 #include <vector>
-#include <functional>
 #include <iomanip>
+#include <fstream>
 
 struct Node {
 
@@ -168,18 +168,24 @@ auto encode(Node* n)
 
 int main()
 {
-    std::string test = "I'd just like to interject for a moment. What you're referring to as Linux, is in fact, GNU/Linux, or as I've recently taken to calling it, GNU plus Linux. Linux is not an operating system unto itself, but rather another free component of a fully functioning GNU system made useful by the GNU corelibs, shell utilities and vital system components comprising a full OS as defined by POSIX. Many computer users run a modified version of the GNU system every day, without realizing it. Through a peculiar turn of events, the version of GNU which is widely used today is often called \"Linux\", and many of its users are not aware that it is basically the GNU system, developed by the GNU Project. There really is a Linux, and these people are using it, but it is just a part of the system they use. Linux is the kernel: the program in the system that allocates the machine's resources to the other programs that you run. The kernel is an essential part of an operating system, but useless by itself; it can only function in the context of a complete operating system. Linux is normally used in combination with the GNU operating system: the whole system is basically GNU with Linux added, or GNU/Linux. All the so-called \"Linux\" distributions are really distributions of GNU/Linux.";
-    //std::string test = "this is an example of a huffman tree";
+    // CHANGE THIS FOR DIFFERENT INPUT TEXT
+    std::string input_file = "examples/wikipedia.txt";
+
+    // read input file as string
+    std::ifstream ifs(input_file);
+    std::stringstream buf;
+    buf << ifs.rdbuf();
+    std::string input = buf.str();
 
     std::unordered_map<char,Node*> lm;
     std::vector<bool> encoded;
 
     // generate Huffman tree
-    Node* tree = gen_tree(test, lm);
+    Node* tree = gen_tree(input, lm);
     print_tree(tree);
 
     // encode string into bit stream
-    for (const char& c: test)
+    for (const char& c: input)
     {
         // convert char to bits
         auto bits = encode(lm[c]);
@@ -188,15 +194,62 @@ int main()
         encoded.insert(encoded.end(), bits.begin(), bits.end());
     }
 
+    // DEBUG: print encoded bitstream
+    // for (const auto& b: encoded)
+    //     std::cout << b;
+
+    // std::cout << std::endl;
+
     // calculate size difference
-    float pdiff = 100 - (float) encoded.size() / (test.length()*8) * 100;
+    float pdiff = 100 - (float) encoded.size() / (input.length()*8) * 100;
     std::cout << std::setprecision(3);
 
-    std::cout << "Uncompressed: " << test.length()*8 << std::endl;
-    std::cout << "Compressed: " << encoded.size() << " (" << pdiff << "% smaller)" << std::endl;
+    std::cout << "Uncompressed: " << input.length()*8 << " bits" << std::endl;
+    std::cout << "Compressed: " << encoded.size() << " bits (" << pdiff << "% smaller)" << std::endl;
+
+    // dump bitstream to compressed file
+    std::ofstream ofs(input_file.substr(input_file.find('/')+1) + ".huff", std::ofstream::binary);
+
+    // temp byte to store bits
+    char b = 0; 
+
+    // loop through bitstream
+    for (int i = 0; i < encoded.size(); ++i)
+    {
+        // every 8 bits, write byte
+        if (i % 8 == 0 && i != 0)
+        {
+            // bulk write 8 bits 
+            ofs.write(&b,1);
+            
+            // reset byte
+            b = 0;
+        }
+
+        // append newest bit to byte
+        b = (b << 1) + encoded[i];
+    }
+
+    // TODO: deal with "extra" 0 bits added to end of byte
+    // (eg. 5 leftover bits will also have 3 meaningless 0 bits)
+
+    // write any leftover bits in byte to file
+    if (encoded.size()-1 % 8 != 0)
+    {
+        // shift bits until they line up w/ start of byte,
+        // except don't shift if 8 bits are already in the byte
+        // (eg. if 5 bits are used, shift left 3 times)
+        if (encoded.size() % 8 != 0)
+            b = b << (8 - encoded.size() % 8);
+
+        // bulk write bits
+        ofs.write(&b,1);
+    }
+
+    ofs.close();
 
     std::cout << "\nPress any key + enter to close.\t";
-    std::string input;
-    std::cin >> input;
+    std::string pause;
+    std::cin >> pause;
     return 0;
 }
