@@ -97,6 +97,14 @@ void print_tree(Node* root)
     std::cout << "\n\n";
 }
 
+void print_bits(std::vector<bool>& bits)
+{
+    for (const auto& b: bits)
+        std::cout << b;
+
+    std::cout << std::endl;
+}
+
 Node* gen_tree(std::string input, std::unordered_map<char, Node*>& lm)
 {
     // create priority queue sorted in ascending order
@@ -149,7 +157,7 @@ Node* gen_tree(std::string input, std::unordered_map<char, Node*>& lm)
     return pq.top();
 }
 
-auto encode(Node* n)
+auto encode_msg(Node* n)
 {
     std::vector<bool> bits;
 
@@ -166,46 +174,167 @@ auto encode(Node* n)
     return bits;
 }
 
-int main()
+void encode_tree(Node* n, std::vector<bool> &bits)
 {
-    // CHANGE THIS FOR DIFFERENT INPUT TEXT
-    std::string input_file = "examples/wikipedia.txt";
+    // if leaf node, append 1
+    if (n->left == nullptr && n->right == nullptr)
+    {
+        bits.push_back(1);
 
+        const char l = n->letter;
+
+        // loop through bits of letter
+        for (int i = 7; i >= 0; --i)
+        {
+            // append the current bit
+            bits.push_back((l >> i) & 1);
+        }
+    }
+    else
+    {
+        // for edge nodes, append 0
+        bits.push_back(0);
+
+        // recursively encode right then left branch
+        encode_tree(n->right, bits);
+        encode_tree(n->left, bits);
+    }
+}
+
+Node* decode_tree(std::vector<bool> &bits, int& i)
+{
+    // decode next bit
+    i++;
+
+    // read leaf node
+    if (bits[i] == 1)
+    {
+        char letter = 0;
+
+        // set "end of char" index
+        const int i_end = i + 8;
+
+        // loop through bits of char
+        for (++i; i <= i_end; ++i)
+        {
+            // add current bit to char
+            letter = (letter << 1) + bits[i];            
+        }
+
+        // reset index to end of char
+        --i;
+
+        // create leaf node and return
+        return new Node(letter, 0);
+    }
+    // read edge node
+    else
+    {
+        // recursively decode right then left branch
+        Node* right = decode_tree(bits, i);
+        Node* left = decode_tree(bits, i);
+        
+        // create parent edge node and return
+        Node* n = new Node(0, 0);
+        n->left = left;
+        n->right = right;
+        return n;
+    }
+}
+
+auto read_file(const std::string file_name)
+{
     // read input file as string
-    std::ifstream ifs(input_file);
+    std::ifstream ifs(file_name, std::ios::binary);
     std::stringstream buf;
     buf << ifs.rdbuf();
-    std::string input = buf.str();
+    return buf.str();
+}
+
+void read_msg(std::string input_file)
+{
+    std::string input = read_file(input_file);
+    std::vector<bool> bits;
+
+    // loop through each char
+    for (const char& c: input)
+    {
+        // loop through bits of char
+        for (int i = 7; i >= 0; --i)
+        {
+            // append the current bit
+            bits.push_back((c >> i) & 1);
+        }
+    }
+
+    // DEBUG: print encoded bitstream
+    //print_bits(bits);
+
+    // needed to properly increment index
+    int i = -1;
+
+    // create tree from bitstream
+    Node* tree = decode_tree(bits, i);
+    print_tree(tree);
+
+    // point to current node
+    Node* n = tree;
+
+    std::string msg;
+
+    // loop through rest of bitstream
+    for (++i; i < bits.size(); ++i)
+    {
+        // if we reached leaf node
+        if (n->left == nullptr && n->right == nullptr)
+        {
+            // append leaf's letter to string
+            msg.append(1, n->letter);
+
+            // reset current node to parent
+            n = tree;
+        }
+        
+        // traverse down the tree
+        n = bits[i] ? n->right : n->left;
+    }
+
+    std::cout << "Decoded message: " << msg << std::endl;
+}
+
+void write_msg(std::string input_file)
+{
+    std::string input = read_file(input_file);
 
     std::unordered_map<char,Node*> lm;
-    std::vector<bool> encoded;
+    std::vector<bool> bits;
 
     // generate Huffman tree
     Node* tree = gen_tree(input, lm);
     print_tree(tree);
 
+    // encode tree into bit stream
+    encode_tree(tree, bits);
+
     // encode string into bit stream
     for (const char& c: input)
     {
         // convert char to bits
-        auto bits = encode(lm[c]);
+        auto char_bits = encode_msg(lm[c]);
 
         // append bits to encoded bit stream
-        encoded.insert(encoded.end(), bits.begin(), bits.end());
+        bits.insert(bits.end(), char_bits.begin(), char_bits.end());
     }
 
     // DEBUG: print encoded bitstream
-    // for (const auto& b: encoded)
-    //     std::cout << b;
-
-    // std::cout << std::endl;
+    //print_bits(bits);
 
     // calculate size difference
-    float pdiff = 100 - (float) encoded.size() / (input.length()*8) * 100;
+    float pdiff = 100 - (float) bits.size() / (input.length()*8) * 100;
     std::cout << std::setprecision(3);
 
     std::cout << "Uncompressed: " << input.length()*8 << " bits" << std::endl;
-    std::cout << "Compressed: " << encoded.size() << " bits (" << pdiff << "% smaller)" << std::endl;
+    std::cout << "Compressed: " << bits.size() << " bits (" << pdiff << "% smaller)" << std::endl;
 
     // dump bitstream to compressed file
     std::ofstream ofs(input_file.substr(input_file.find('/')+1) + ".huff", std::ofstream::binary);
@@ -214,7 +343,7 @@ int main()
     char b = 0; 
 
     // loop through bitstream
-    for (int i = 0; i < encoded.size(); ++i)
+    for (int i = 0; i < bits.size(); ++i)
     {
         // every 8 bits, write byte
         if (i % 8 == 0 && i != 0)
@@ -227,26 +356,36 @@ int main()
         }
 
         // append newest bit to byte
-        b = (b << 1) + encoded[i];
+        b = (b << 1) + bits[i];
     }
 
     // TODO: deal with "extra" 0 bits added to end of byte
     // (eg. 5 leftover bits will also have 3 meaningless 0 bits)
 
+    // if bitstream does not evenly fit into bytes,
     // write any leftover bits in byte to file
-    if (encoded.size()-1 % 8 != 0)
+    if (bits.size()-1 % 8 != 0)
     {
-        // shift bits until they line up w/ start of byte,
+        // shift bits until they line up w/ start of byte (pad with 0s),
         // except don't shift if 8 bits are already in the byte
         // (eg. if 5 bits are used, shift left 3 times)
-        if (encoded.size() % 8 != 0)
-            b = b << (8 - encoded.size() % 8);
+        if (bits.size() % 8 != 0)
+            b = b << (8 - bits.size() % 8);
 
         // bulk write bits
         ofs.write(&b,1);
     }
 
     ofs.close();
+}
+
+int main()
+{
+    std::string input_file = "gnu";
+
+    // encode + decode message
+    write_msg("examples/" + input_file + ".txt");
+    read_msg(input_file + ".txt.huff");
 
     std::cout << "\nPress any key + enter to close.\t";
     std::string pause;
